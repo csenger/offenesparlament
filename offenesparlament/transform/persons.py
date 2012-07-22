@@ -58,7 +58,18 @@ def generate_person_long_names(engine):
                          'slug': slug,
                          'id': person['id']},
                          unique=['id'])
-        nkp.ensure_value(long_name, data=person)
+        tries = 0
+        while True:
+            try:
+                nkp.ensure_value(long_name, data=person)
+            except ValueError, E:
+                log.warn('Exception: %s' % str(E))
+                tries = tries + 1
+                if tries > 5:
+                    raise
+            else:
+                break
+
 
     log.info("Updating 'rollen' to have fingerprints...")
     Rolle = sl.get_table(engine, 'rolle')
