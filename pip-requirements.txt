@@ -12,5 +12,6 @@ python-Levenshtein
 solrpy
 python-dateutil
 -e git+https://github.com/okfn/sqlaload.git#egg=sqlaload
+-e git+https://github.com/pudo/nomenklatura-client.git#egg=nkclient
 requests
 webhelpers
