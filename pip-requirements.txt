@@ -11,6 +11,6 @@ webstore-client
 python-Levenshtein
 solrpy
 python-dateutil
-sqlaload
+-e git+https://github.com/okfn/sqlaload.git#egg=sqlaload
 requests
 webhelpers
