@@ -34,6 +34,43 @@ Feature-Ideen
 * Ablauf-Titel automatisch kürzen.
 * WebTV des Bundestags scrapen.
 
+Installation
+------------
+
+Erzeuge eine virtualenv, clone offenesparlament und installiere es::
+
+  virtualenv --no-site-packages offenes_parlament
+  cd offenes_parlament
+  bin/pip install -e git+https://github.com/pudo/offenesparlament
+
+Für die Suche benötigt offenesparlament eine Solrinstallation. Du
+kannst Solr auf dienem Rechner installieren und konfigurieren. Für
+Entwicklungs- oder Testinstallationen ist es aber am enfachsten, Solr
+herunterzuladen, zu entpacken und von der Kommandozeile zu starten::
+
+    mkdir op_solr
+    cd op_solr
+    wget http://ftp-stud.hs-esslingen.de/pub/Mirrors/ftp.apache.org/dist/lucene/solr/3.6.1/apache-solr-3.6.1.tgz
+    tar xzf apache-solr-3.6.1.tgz
+    cd apache-solr-3.6.1/example
+    java -jar start.jar
+
+Solr ist dann unter http://localhost:8983/solr erreichbar.
+    
+Die Standardeinstellungen für offenesparlament befinden sich in
+src/offenesparlament/offenesparlament/default_settings.py. Der
+Einfachheit halber verwenden wir hier sqlite. Den Pfad zu dieser Datei
+exportieren wir als Umgebungsvariable PARLAMENT_SETTINGS::
+
+  cat > einstellungen.py <<EOF
+  SQLALCHEMY_DATABASE_URI = 'sqlite:///parlament.db'
+  ETL_URL = 'sqlite:///parlament_etl.db'
+  SOLR_URL = 'http://localhost:8983/solr'
+  EOF
+  export PARLAMENT_SETTINGS='/pfad/zu/einstellungen.py'
+
+
+
 Kontakt
 -------
 
