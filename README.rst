@@ -9,6 +9,7 @@ Abstimmungsverhalten einzelner Abgeordneter oder dem Inhalt der Dokumente.
 Dieses README befasst sich nur mit den technischen Aspekten der Seite, für 
 weitere inhaltliche Informationen besuchen Sie: http://offenesparlament.de.
 
+
 Extract, Transform, Load
 ------------------------
 
@@ -28,11 +29,13 @@ Die Auswertung der Inhalte erfolgt in den folgenden Schritten:
 * Load (``offenesparlament.load``): Daten aus dem Webstore-System werden in
   die eigentliche produktiv-Datenbank geladen.
 
+
 Feature-Ideen
 -------------
 
 * Ablauf-Titel automatisch kürzen.
 * WebTV des Bundestags scrapen.
+
 
 Installation
 ------------
@@ -56,19 +59,51 @@ herunterzuladen, zu entpacken und von der Kommandozeile zu starten::
     java -jar start.jar
 
 Solr ist dann unter http://localhost:8983/solr erreichbar.
-    
+
+Konfiguration
+-------------
+
+Während der Transformation der Daten normalisiert offenesparlament die Namen der Abgeordneten. Dazu verwendet es den Nomenklatura_ webservice. Für die Konfiguration benötigst Du einen apikey. Diesen findest Du nach der Anmeldung dort in deinem Profil.
+
 Die Standardeinstellungen für offenesparlament befinden sich in
 src/offenesparlament/offenesparlament/default_settings.py. Der
-Einfachheit halber verwenden wir hier sqlite. Den Pfad zu dieser Datei
-exportieren wir als Umgebungsvariable PARLAMENT_SETTINGS::
+Einfachheit halber verwenden wir hier sqlite statt postgres. 
+Den Pfad zu dieser Datei exportieren wir als Umgebungsvariable 
+PARLAMENT_SETTINGS::
 
   cat > einstellungen.py <<EOF
   SQLALCHEMY_DATABASE_URI = 'sqlite:///parlament.db'
   ETL_URL = 'sqlite:///parlament_etl.db'
   SOLR_URL = 'http://localhost:8983/solr'
+  NOMENKLATURA_PERSONS_DATASET = 'offenesparlament'
+  NOMENKLATURA_API_KEY = '<your nomenklatura api key>'
   EOF
   export PARLAMENT_SETTINGS='/pfad/zu/einstellungen.py'
 
+
+Import der Daten
+----------------
+
+Es wird mehrere Stunden dauern, die Daten in offenes Parlament zu
+importieren. Insbesondere `extract_docs` und `transform` dauern lange.
+
+  echo $PARLAMENT_SETTINGS
+  /pfad/zu/einstellungen.py
+
+  bin/python src/offenesparlament/offenesparlament/manage.py extract_base
+  bin/python src/offenesparlament/offenesparlament/manage.py extract_docs
+  bin/python src/offenesparlament/offenesparlament/manage.py extract_votes
+  bin/python src/offenesparlament/offenesparlament/manage.py extract_media
+
+  bin/python src/offenesparlament/offenesparlament/manage.py transform
+
+  bin/python src/offenesparlament/offenesparlament/manage.py load  
+
+
+Starten von offenesparlament
+----------------------------
+
+  bin/python src/offenesparlament/offenesparlament/manage.py runserver
 
 
 Kontakt
@@ -76,6 +111,7 @@ Kontakt
 
 * Friedrich Lindenberg <friedrich.lindenberg@okfn.org>
 * http://lists.okfn.org/mailman/listinfo/offenes-parlament
+
 
 Lizenz
 ------
@@ -87,5 +123,6 @@ der Lizenz ist unter http://www.gnu.org/licenses/agpl.html einsehbar.
 
 
 
+.. _Nomenklatura: http://nomenklatura.okfnlabs.org
 
 psql -c "COPY (SELECT * FROM webtv_speech ws LEFT JOIN speech s ON s.wahlperiode = CAST(ws.wp AS integer) AND s.sitzung = CAST(ws.session AS integer) AND s.sequence = ws.sequence ORDER BY ws.wp, ws.session, ws.sequence) TO STDOUT WITH CSV HEADER;" parlament_etl >speeches.csv
