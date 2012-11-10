@@ -2,83 +2,58 @@
 from collections import defaultdict
 from datetime import datetime
 from urllib import quote
-from StringIO import StringIO
+import re
 
 from colander import Invalid
+from jinja2 import Markup
 from flask import Flask, g, request, render_template, abort, flash, json
 from flask import url_for, redirect, jsonify, Response
-from webhelpers.feedgenerator import Rss201rev2Feed
 
 from offenesparlament.core import app, pages, db
 from offenesparlament.model import Ablauf, Position, Abstimmung, Stimme
-from offenesparlament.model import Person, Gremium
+from offenesparlament.model import Person, Gremium, Dokument
 from offenesparlament.model import Sitzung, Zitat, Debatte
 from offenesparlament.model import Abo
 
 from offenesparlament.pager import Pager
-from offenesparlament.util import jsonify
+from offenesparlament.util import jsonify, make_feed
 from offenesparlament.searcher import SolrSearcher
 from offenesparlament.abo import AboSchema, send_activation
 from offenesparlament import aggregates
 
-
-def make_feed(title, author='Deutscher Bundestag (inoffiziell)',
-    positionen=[], debatten=[], limit=10):
-    items = []
-    for position in positionen:
-        items.append({
-            'title': '[Drs] ' + position.typ + ': ' + position.ablauf.titel,
-            'pubdate': position.date,
-            'link': url_for('position', key=position.key, _external=True),
-            'description': position.ablauf.abstrakt
-            })
-    for debatte in debatten:
-        if debatte.nummer is None:
-            continue
-        items.append({
-            'title': '[Rede] ' + debatte.titel,
-            'pubdate': debatte.sitzung.date,
-            'link': url_for('debatte', wahlperiode=debatte.sitzung.wahlperiode,
-                nummer=debatte.sitzung.nummer, debatte=debatte.nummer,
-                _external=True),
-            'description': debatte.text
-            })
-    feed = Rss201rev2Feed(title, url_for('index', _external=True), 
-        'Was passiert im Bundestag?', author_name=author)
-    items = sorted(items, key=lambda i: i.get('pubdate').isoformat(), reverse=True)
-    for item in items[:10]:
-        print item
-        feed.add_item(**item)
-    sio = StringIO()
-    feed.write(sio, 'utf-8')
-    return Response(sio.getvalue(), status=200, mimetype='application/xml')
-
-
-@app.route("/plenum/<wahlperiode>/<nummer>/<debatte>/<speech>")
-@app.route("/plenum/<wahlperiode>/<nummer>/<debatte>/<speech>.<format>")
-def speech(wahlperiode, nummer, debatte, format=None):
-    debatte = Debatte.query.filter_by(nummer=debatte)\
-            .join(Debatte.sitzung)\
-            .filter(Debatte.sitzung.wahlperiode == wahlperiode)\
-            .filter(Debatte.sitzung.nummer == nummer).first()
-    if debatte is None:
-        abort(404)
-    sitzung_url = url_for('sitzung', wahlperiode=wahlperiode, nummer=nummer)
-    url = sitzung_url + '?debatte.titel=' + quote(debatte.titel)
-    return redirect(url)
+@app.template_filter()
+def drslink(text, verbose=False):
+    def r(m):
+        num = m.group(1).replace(' ', '')
+        dok = Dokument.query.filter_by(nummer=num).first()
+        if dok is None:
+            return m.group(1)
+        link = "<a href='" + dok.link + "'>" + dok.nummer + "</a>"
+        print dok.positionen.count()
+        if verbose and dok.positionen.count() == 1:
+            pos = dok.positionen.first()
+            url = url_for('position', key=pos.key)
+            link += " <span class='ablauf-ref'>(<a href='"+url+\
+                    "'>"+pos.ablauf.titel+"</a>)</span>"
+        return link
+    text = re.sub(r"(\d{2,3}/\d{1,6}(\s*\(.{1,10}\))?)", r, text)
+    return Markup(text)
 
 
 @app.route("/plenum/<wahlperiode>/<nummer>/<debatte>")
 @app.route("/plenum/<wahlperiode>/<nummer>/<debatte>.<format>")
 def debatte(wahlperiode, nummer, debatte, format=None):
     debatte = Debatte.query.filter_by(nummer=debatte)\
-            .join(Debatte.sitzung)\
-            .filter(Debatte.sitzung.wahlperiode == wahlperiode)\
-            .filter(Debatte.sitzung.nummer == nummer).first()
+            .join(Sitzung)\
+            .filter(Sitzung.wahlperiode == wahlperiode)\
+            .filter(Sitzung.nummer == nummer).first()
     if debatte is None:
         abort(404)
+    if format == 'json':
+        return jsonify(debatte)
     sitzung_url = url_for('sitzung', wahlperiode=wahlperiode, nummer=nummer)
-    url = sitzung_url + '?debatte.titel=' + quote(debatte.titel)
+    url = sitzung_url + '?debatte.titel=' + quote(debatte.titel.encode('utf-8'))
+    url = url + '&paging=false'
     return redirect(url)
 
 
@@ -93,11 +68,15 @@ def sitzung(wahlperiode, nummer, format=None):
     searcher.filter('sitzung.wahlperiode', sitzung.wahlperiode)
     searcher.filter('sitzung.nummer', sitzung.nummer)
     searcher.add_facet('debatte.titel')
-    searcher.add_facet('person.name')
+    searcher.add_facet('redner')
     searcher.sort('sequenz', 'asc')
     pager = Pager(searcher, 'sitzung', request.args,
             wahlperiode=wahlperiode, nummer=nummer)
     pager.limit = 100
+    if format == 'json':
+        data = sitzung.to_dict()
+        data['results'] = pager
+        return jsonify(data)
     return render_template('sitzung_view.html',
             sitzung=sitzung, pager=pager, searcher=searcher)
 
@@ -109,6 +88,8 @@ def sitzungen(format=None):
     searcher.add_facet('wahlperiode')
     searcher.sort('date', 'desc')
     pager = Pager(searcher, 'sitzungen', request.args)
+    if format == 'json':
+        return jsonify({'results': pager})
     return render_template('sitzung_search.html',
             searcher=searcher, pager=pager)
 
@@ -119,6 +100,8 @@ def position(key, format=None):
     position = Position.query.filter_by(key=key).first()
     if position is None:
         abort(404)
+    if format == 'json':
+        return jsonify(position)
     return redirect(url_for('ablauf',
         wahlperiode=position.ablauf.wahlperiode,
         key=position.ablauf.key) + '#' + position.key)
@@ -131,8 +114,12 @@ def ablauf(wahlperiode, key, format=None):
                                     key=key).first()
     if ablauf is None:
         abort(404)
+    if format == 'json':
+        return jsonify(ablauf)
     referenzen = defaultdict(set)
     for ref in ablauf.referenzen:
+        if ref.dokument.typ == 'plpr' and ref.dokument.hrsg == 'BT':
+            continue
         if ref.seiten:
             referenzen[ref.dokument].add(ref.seiten)
         else:
@@ -153,6 +140,8 @@ def ablaeufe(format=None):
     searcher.add_facet('sachgebiet')
     searcher.add_facet('schlagworte')
     pager = Pager(searcher, 'ablaeufe', request.args)
+    if format == 'json':
+        return jsonify({'results': pager})
     return render_template('ablauf_search.html',
             searcher=searcher, pager=pager)
 
@@ -179,6 +168,8 @@ def gremien(format=None):
             order_by(Gremium.name.asc()).all()
     others = Gremium.query.filter_by(typ='sonstiges').\
             order_by(Gremium.name.asc()).all()
+    if format == 'json':
+        return jsonify({'results': committees + others})
     return render_template('gremium_list.html',
             committees=committees, others=others)
 
@@ -189,6 +180,8 @@ def gremium(key, format=None):
     gremium = Gremium.query.filter_by(key=key).first()
     if gremium is None:
         abort(404)
+    if format == 'json':
+        return jsonify(gremium)
     searcher = SolrSearcher(Ablauf, request.args)
     #searcher.sort('positionen.date')
     searcher.filter('positionen.zuweisungen.gremium', gremium.key)
@@ -205,6 +198,8 @@ def persons(format=None):
     searcher.add_facet('rollen.fraktion')
     searcher.add_facet('berufsfeld')
     pager = Pager(searcher, 'persons', request.args)
+    if format == 'json':
+        return jsonify({'results': pager})
     return render_template('person_search.html',
             searcher=searcher, pager=pager)
 
@@ -215,6 +210,8 @@ def person(slug, format=None):
     person = Person.query.filter_by(slug=slug).first()
     if person is None:
         abort(404)
+    if format == 'json':
+        return jsonify(person)
     return person_render(person, format)
 
 
